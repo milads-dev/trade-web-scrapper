@@ -20,11 +20,10 @@ headers = {
     "cookie": COOKIE
 }
 
-# account_id = 3741740
-# account_id = 3837297
-
 def fetch_trades():
-    account_id = 3672903
+    account_id = 3978190
+    # account_id = 3978190
+    # account_id =4020848
     limit = 25   
     all_trades = []
     page = 1
@@ -73,71 +72,10 @@ def fetch_trades():
         "pl": "PnL",
         "fees": "Fees"
     })
-    df.to_csv("trades3.csv", index=False)
+    df.to_csv("trades.csv", index=False)
     print(f"Exported {len(df)} trades to trades.csv")
 
-def convert_and_export_daily_trades():
-    # 1. Read the CSV file
-
-    df = pd.read_csv("trades3.csv",)
-
-    print(df.head())
-
-    # 2. Convert timestamp to datetime
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-
-    # 3. Extract just the date part
-    df['date'] = df['Timestamp'].dt.date
-
-    # 4. Create an output directory
-    output_dir = Path("daily_trades_raw")
-    output_dir.mkdir(exist_ok=True)
-# 
-    # 5. Group by date and export each group
-    for date, group in df.groupby('date'):
-        # Sort newest to oldest before saving (optional)
-        group = group.sort_values('Timestamp', ascending=False)
-        
-        # Define output filename
-        output_file = output_dir / f"trades_{date}.csv"
-        
-        # Save to CSV without the extra index column
-        group.to_csv(output_file, index=False)
-        
-        print(f"✅ Saved {output_file}")
-
-def merge_duplicate_trades():
-    output_dir = Path("daily_trades")
-    output_file = output_dir / "trades_2025-10-08.csv"
-    
-
-    df = pd.read_csv(output_file)
-    print(df.head())
- 
-
-    # Convert timestamp to datetime
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-
-        # Group by the identifying fields
-    grouped = (
-        df.groupby(['Timestamp', 'Contract', 'Side', 'Price'], as_index=False)
-        .agg({
-            'Volume': 'sum',
-            'PnL': 'sum',
-            'Fees': 'sum',
-            'date': 'first'  # keep one date value (they should all be the same)
-        })
-    )
-
-        # Save the merged data
-    grouped = grouped.sort_values('Timestamp', ascending=False)
-    df['date'] = df['Timestamp'].dt.date
-
-    grouped.to_csv(f"trades_merged_{df['date']}.csv", index=False)
-
-    print("✅ Merged duplicate trades and saved to trades_merged.csv")
-
-def process_trades(input_file: str, output_dir: str = "daily_trades_cleaned_new"):
+def process_trades(input_file: str, output_dir: str = "daily_trades_cleaned"):
     """
     Load trades CSV, merge duplicates, sort by timestamp descending,
     and save one CSV per day.
@@ -175,12 +113,57 @@ def process_trades(input_file: str, output_dir: str = "daily_trades_cleaned_new"
         group.to_csv(file_name, index=False)
         print(f"✅ Saved {file_name}")
 
+"""Extract trade setups from cleaned daily trades CSV."""
+def trade_setup():
+    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-13.csv")
+    df = df.sort_values("Timestamp")
+
+    setups = []
+    position = 0
+    current_trades = []
+
+    for _, row in df.iterrows():
+        lots = row["Volume"]
+        if row["Side"] == "Buy":
+            position += lots
+        else:  
+            position -= lots
+        current_trades.append(row)
+
+        if abs(position) < 1e-6:  # back to zero
+            setup_df = pd.DataFrame(current_trades)
+            total_volume = setup_df["Volume"].sum()
+            entry_price = setup_df[setup_df["Side"] == "Sell"]["Price"].mean()
+            exit_price = setup_df[setup_df["Side"] == "Buy"]["Price"].mean()
+
+            gross_pnl = setup_df["PnL"].sum()
+            total_fees = setup_df["Fees"].sum()
+            net_pnl = gross_pnl - total_fees   # ✅ PnL adjusted for fees
+
+            entry_time = pd.to_datetime(setup_df.iloc[0]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
+            exit_time  = pd.to_datetime(setup_df.iloc[-1]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
+
+
+            setups.append({
+                "ContractName": row["Contract"],
+                "Type": "Short" if setup_df.iloc[0]["Side"] == "Sell" else "Long",
+                "EnteredAt": entry_time,
+                "ExitedAt": exit_time,
+                "Size": total_volume,
+                "EntryPrice": entry_price,
+                "ExitPrice": exit_price,
+                "PnL": net_pnl.round(2),
+            })
+            current_trades = []
+
+    setups_df = pd.DataFrame(setups)
+    setups_df.to_csv("trade_setups.csv", index=False)
+
 def main():
     print("This script fetches trades from Topstep and saves them into daily CSV files.")
     fetch_trades()
-    # convert_and_export_daily_trades()
-    # merge_duplicate_trades()
-    # process_trades("trades3.csv")
+    process_trades("trades.csv","daily_trades_cleaned")
+    trade_setup()
 
 
 if __name__ == "__main__":

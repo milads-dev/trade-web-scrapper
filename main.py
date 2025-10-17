@@ -20,50 +20,59 @@ headers = {
     "cookie": COOKIE
 }
 
-def fetch_trades():
-    account_id = 3978190
-    # account_id = 3978190
-    # account_id =4020848
-    limit = 25   
+BASE_URL = "https://trm-api.topstep.com/me/accounts"
+
+def fetch_trades_page(account_id: str, page: int, limit: int = 25):
+    url = f"{BASE_URL}/{account_id}?page={page}&limit={limit}&sort=-timeStamp"
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        print(f"❌ Error {response.status_code}: {response.text}")
+        return None
+
+    data = response.json()
+    trades = data.get("account", {}).get("trades", [])
+    pagination = data.get("account", {}).get("tradesPagination", {})
+    return trades, pagination
+
+def fetch_all_trades(account_id: str, limit: int = 25):
     all_trades = []
     page = 1
 
     while True:
-        url = f"https://trm-api.topstep.com/me/accounts/{account_id}?page={page}&limit={limit}sort=-timeStamp"
-        r = requests.get(url, headers=headers)
-
-        if r.status_code != 200:
-            print(f"Error {r.status_code}: {r.text}")
+        result = fetch_trades_page(account_id, page, limit)
+        if not result:
             break
 
-        data = r.json()
-        trades = data.get("account", {}).get("trades", [])
+        trades, pagination = result
 
-        if not trades: 
+        if not trades:
             break
 
         all_trades.extend(trades)
-        print(f"Fetched page {page}, total trades so far: {len(all_trades)}")
+        print(f"📄 Page {page} fetched, total trades: {len(all_trades)}")
 
-
-        # Pagination info
-        pagination = data.get("account", {}).get("tradesPagination", {})
         if page >= pagination.get("totalPages", page):
             break
-
         page += 1
 
+    return all_trades
 
-    # Save to CSV
-    df = pd.DataFrame(all_trades)
-    # --- Convert timestamp from CT to EST ---
+def transform_trades(trades):
+    df = pd.DataFrame(trades)
+
+    if df.empty:
+        print("⚠️ No trades found.")
+        return df
+
+    # Convert timestamp from CT → EST → remove timezone
     df['timeStamp'] = pd.to_datetime(df['timeStamp'])
     df['timeStamp'] = df['timeStamp'].dt.tz_localize('America/Chicago').dt.tz_convert('America/New_York')
     df['timeStamp'] = df['timeStamp'].dt.tz_localize(None)
-    df = df.sort_values('timeStamp', ascending=False)
-    df = df[["timeStamp", "contractName", "action", "lots", "price", "pl", "fees"]]
 
-    df = df.rename(columns={
+    df = df.sort_values('timeStamp', ascending=False)
+
+    df = df[["timeStamp", "contractName", "action", "lots", "price", "pl", "fees"]].rename(columns={
         "timeStamp": "Timestamp",
         "contractName": "Contract",
         "action": "Side",
@@ -72,24 +81,39 @@ def fetch_trades():
         "pl": "PnL",
         "fees": "Fees"
     })
-    df.to_csv("trades.csv", index=False)
-    print(f"Exported {len(df)} trades to trades.csv")
 
-def process_trades(input_file: str, output_dir: str = "daily_trades_cleaned"):
-    """
-    Load trades CSV, merge duplicates, sort by timestamp descending,
-    and save one CSV per day.
-    """
-    # --- Load CSV ---
+    return df
+
+def save_trades_to_csv(df, filename="trades.csv"):
+    output_path = Path(filename)
+    df.to_csv(output_path, index=False)
+    print(f"✅ Exported {len(df)} trades → {output_path.resolve()}")
+
+# "Fetch trades from API and save to CSV."
+def fetch_trades():
+    account_id = input("🏦 Enter your account number: ").strip()
+
+    if not account_id.isdigit():
+        print("❌ Invalid account number — must be numeric.")
+        return
+
+    print(f"🔍 Fetching trades for account {account_id}...")
+    trades = fetch_all_trades(account_id)
+
+    df = transform_trades(trades)
+    if not df.empty:
+        save_trades_to_csv(df)
+    else:
+        print("⚠️ No trades to save.")
+
+# "Process and clean trades, then save daily CSVs."
+def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trades_cleaned"):
     df = pd.read_csv(input_file)
     
-    # --- Convert Timestamp column to datetime ---
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     
-    # --- Extract date for grouping ---
     df['date'] = df['Timestamp'].dt.date
 
-    # --- Merge duplicates ---
     grouped = (
         df.groupby(['Timestamp', 'Contract', 'Side', 'Price'], as_index=False)
           .agg({
@@ -100,14 +124,11 @@ def process_trades(input_file: str, output_dir: str = "daily_trades_cleaned"):
           })
     )
     
-    # --- Sort descending by Timestamp ---
     grouped = grouped.sort_values('Timestamp', ascending=False)
 
-    # --- Create output directory ---
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
 
-    # --- Split by date and save ---
     for date, group in grouped.groupby('date'):
         file_name = output_path / f"trades_merged_{date}.csv"
         group.to_csv(file_name, index=False)
@@ -115,7 +136,7 @@ def process_trades(input_file: str, output_dir: str = "daily_trades_cleaned"):
 
 """Extract trade setups from cleaned daily trades CSV."""
 def trade_setup():
-    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-13.csv")
+    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-16.csv")
     df = df.sort_values("Timestamp")
 
     setups = []
@@ -159,11 +180,34 @@ def trade_setup():
     setups_df = pd.DataFrame(setups)
     setups_df.to_csv("trade_setups.csv", index=False)
 
+    print(f"✅ Extracted {len(setups_df)} trade setups → trade_setups.csv")
+
+def main_menu():
+    menu_options = {
+        "1": ("Fetch Trades", fetch_trades),
+        "2": ("Transform Trades", process_trades),
+        "3": ("Generate Summary", trade_setup),
+        "4": ("Exit", None)
+    }
+
+    while True:
+        print("\n=== TRADE AUTOMATION MENU ===")
+        for key, (desc, _) in menu_options.items():
+            print(f"{key}. {desc}")
+
+        choice = input("\nEnter your choice: ").strip()
+
+        if choice == "4":
+            print("👋 Exiting program.")
+            break
+        elif choice in menu_options:
+            _, action = menu_options[choice]
+            action()  # run the selected function
+        else:
+            print("❌ Invalid option, try again.")
+
 def main():
-    print("This script fetches trades from Topstep and saves them into daily CSV files.")
-    fetch_trades()
-    process_trades("trades.csv","daily_trades_cleaned")
-    trade_setup()
+    main_menu()
 
 
 if __name__ == "__main__":

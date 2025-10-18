@@ -139,7 +139,7 @@ def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trad
 
 """Extract trade setups from cleaned daily trades CSV."""
 def trade_setup():
-    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-13.csv")
+    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-17.csv")
     df = df.sort_values("Timestamp")
 
     setups = []
@@ -154,7 +154,7 @@ def trade_setup():
             position -= lots
         current_trades.append(row)
 
-        if abs(position) < 1e-6:  # back to zero
+        if abs(position) == 0:  # back to zero
             setup_df = pd.DataFrame(current_trades)
             total_volume = setup_df["Volume"].sum()
             entry_price = setup_df[setup_df["Side"] == "Sell"]["Price"].mean()

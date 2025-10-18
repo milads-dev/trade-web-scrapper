@@ -1,10 +1,13 @@
 import requests
 import pandas as pd
 import os
-from dotenv import load_dotenv
+from dotenv import set_key, load_dotenv
 from pathlib import Path
+import argparse
 
-load_dotenv() 
+
+ENV_PATH = Path(".env")
+load_dotenv(ENV_PATH)
 
 TOKEN = os.getenv("BEARER_TOKEN")
 COOKIE = os.getenv("COOKIE")
@@ -136,7 +139,7 @@ def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trad
 
 """Extract trade setups from cleaned daily trades CSV."""
 def trade_setup():
-    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-16.csv")
+    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-13.csv")
     df = df.sort_values("Timestamp")
 
     setups = []
@@ -171,8 +174,8 @@ def trade_setup():
                 "EnteredAt": entry_time,
                 "ExitedAt": exit_time,
                 "Size": total_volume,
-                "EntryPrice": entry_price,
-                "ExitPrice": exit_price,
+                "EntryPrice": entry_price.round(2),
+                "ExitPrice": exit_price.round(2),
                 "PnL": net_pnl.round(2),
             })
             current_trades = []
@@ -206,8 +209,29 @@ def main_menu():
         else:
             print("❌ Invalid option, try again.")
 
+def update_env_var(key, value):
+    if not ENV_PATH.exists():
+        print("⚠️ No .env file found — creating a new one.")
+        ENV_PATH.touch()
+
+    set_key(ENV_PATH, key, value)
+    os.environ[key] = value
+    print(f"✅ Updated {key} in .env")
+
 def main():
-    main_menu()
+    parser = argparse.ArgumentParser(description="Trade Automation Tool CLI")
+    parser.add_argument("--update-token", help="Update token in .env")
+    parser.add_argument("--update-cookie", help="Update Cookie in .env")
+
+    args = parser.parse_args()
+
+    if args.update_token:
+        update_env_var("BEARER_TOKEN", args.update_token)
+    if args.update_cookie:
+        update_env_var("COOKIE", args.update_cookie)
+    if not any(vars(args).values()):
+        main_menu()
+
 
 
 if __name__ == "__main__":

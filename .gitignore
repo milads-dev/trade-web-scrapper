@@ -6,3 +6,5 @@ venv/
 
 # CSV trade data files
 *.csv
+
+.DS_Store

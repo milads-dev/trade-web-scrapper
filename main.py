@@ -14,7 +14,7 @@ COOKIE = os.getenv("COOKIE")
 
 
 headers = {
-    "Authorization": f"Bearer {TOKEN}",   
+    "Authorization": f"Bearer {TOKEN}",
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/json",
     "Content-Type": "application/json",
@@ -24,6 +24,7 @@ headers = {
 }
 
 BASE_URL = "https://trm-api.topstep.com/me/accounts"
+
 
 def fetch_trades_page(account_id: str, page: int, limit: int = 25):
     url = f"{BASE_URL}/{account_id}?page={page}&limit={limit}&sort=-timeStamp"
@@ -37,6 +38,7 @@ def fetch_trades_page(account_id: str, page: int, limit: int = 25):
     trades = data.get("account", {}).get("trades", [])
     pagination = data.get("account", {}).get("tradesPagination", {})
     return trades, pagination
+
 
 def fetch_all_trades(account_id: str, limit: int = 25):
     all_trades = []
@@ -61,6 +63,7 @@ def fetch_all_trades(account_id: str, limit: int = 25):
 
     return all_trades
 
+
 def transform_trades(trades):
     df = pd.DataFrame(trades)
 
@@ -70,7 +73,8 @@ def transform_trades(trades):
 
     # Convert timestamp from CT → EST → remove timezone
     df['timeStamp'] = pd.to_datetime(df['timeStamp'])
-    df['timeStamp'] = df['timeStamp'].dt.tz_localize('America/Chicago').dt.tz_convert('America/New_York')
+    df['timeStamp'] = df['timeStamp'].dt.tz_localize(
+        'America/Chicago').dt.tz_convert('America/New_York')
     df['timeStamp'] = df['timeStamp'].dt.tz_localize(None)
 
     df = df.sort_values('timeStamp', ascending=False)
@@ -87,12 +91,15 @@ def transform_trades(trades):
 
     return df
 
+
 def save_trades_to_csv(df, filename="trades.csv"):
     output_path = Path(filename)
     df.to_csv(output_path, index=False)
     print(f"✅ Exported {len(df)} trades → {output_path.resolve()}")
 
 # "Fetch trades from API and save to CSV."
+
+
 def fetch_trades():
     account_id = input("🏦 Enter your account number: ").strip()
 
@@ -110,11 +117,13 @@ def fetch_trades():
         print("⚠️ No trades to save.")
 
 # "Process and clean trades, then save daily CSVs."
+
+
 def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trades_cleaned"):
     df = pd.read_csv(input_file)
-    
+
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    
+
     df['date'] = df['Timestamp'].dt.date
 
     grouped = (
@@ -126,7 +135,7 @@ def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trad
               'date': 'first'  # keep one date
           })
     )
-    
+
     grouped = grouped.sort_values('Timestamp', ascending=False)
 
     output_path = Path(output_dir)
@@ -137,9 +146,12 @@ def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trad
         group.to_csv(file_name, index=False)
         print(f"✅ Saved {file_name}")
 
+
 """Extract trade setups from cleaned daily trades CSV."""
+
+
 def trade_setup():
-    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-17.csv")
+    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-21.csv")
     df = df.sort_values("Timestamp")
 
     setups = []
@@ -150,7 +162,7 @@ def trade_setup():
         lots = row["Volume"]
         if row["Side"] == "Buy":
             position += lots
-        else:  
+        else:
             position -= lots
         current_trades.append(row)
 
@@ -164,16 +176,17 @@ def trade_setup():
             total_fees = setup_df["Fees"].sum()
             net_pnl = gross_pnl - total_fees   # ✅ PnL adjusted for fees
 
-            entry_time = pd.to_datetime(setup_df.iloc[0]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
-            exit_time  = pd.to_datetime(setup_df.iloc[-1]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
-
+            entry_time = pd.to_datetime(
+                setup_df.iloc[0]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
+            exit_time = pd.to_datetime(
+                setup_df.iloc[-1]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
 
             setups.append({
                 "ContractName": row["Contract"],
                 "Type": "Short" if setup_df.iloc[0]["Side"] == "Sell" else "Long",
                 "EnteredAt": entry_time,
                 "ExitedAt": exit_time,
-                "Size": total_volume,
+                "Size": total_volume / 2,
                 "EntryPrice": entry_price.round(2),
                 "ExitPrice": exit_price.round(2),
                 "PnL": net_pnl.round(2),
@@ -181,9 +194,10 @@ def trade_setup():
             current_trades = []
 
     setups_df = pd.DataFrame(setups)
-    setups_df.to_csv("trade_setups.csv", index=False)
+    setups_df.to_csv("trade_positions.csv", index=False)
 
     print(f"✅ Extracted {len(setups_df)} trade setups → trade_setups.csv")
+
 
 def main_menu():
     menu_options = {
@@ -209,6 +223,7 @@ def main_menu():
         else:
             print("❌ Invalid option, try again.")
 
+
 def update_env_var(key, value):
     if not ENV_PATH.exists():
         print("⚠️ No .env file found — creating a new one.")
@@ -217,6 +232,7 @@ def update_env_var(key, value):
     set_key(ENV_PATH, key, value)
     os.environ[key] = value
     print(f"✅ Updated {key} in .env")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Trade Automation Tool CLI")
@@ -231,7 +247,6 @@ def main():
         update_env_var("COOKIE", args.update_cookie)
     if not any(vars(args).values()):
         main_menu()
-
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 import logging
-from .config import DATE_FORMAT
+from config import DATE_FORMAT
 
 
 def save_to_csv(df: pd.DataFrame, path: Path):
@@ -52,4 +52,4 @@ def extract_trade_setups(input_file: Path):
             current = []
 
     setups_df = pd.DataFrame(setups)
-    save_to_csv(setups_df, Path("trade_setups.csv"))
+    save_to_csv(setups_df, Path("trade_positions.csv"))

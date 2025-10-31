@@ -1,8 +1,8 @@
-import pandas as pd
 from pathlib import Path
 from api import fetch_all_trades
 from transform import transform_trades
 from config import update_env_var
+from process import process_trades, extract_trade_setups
 import argparse
 
 
@@ -29,84 +29,12 @@ def fetch_trades():
         print("⚠️ No trades to save.")
 
 
-def process_trades(input_file: str = "trades.csv", output_dir: str = "daily_trades_cleaned"):
-    df = pd.read_csv(input_file)
-
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-
-    df['date'] = df['Timestamp'].dt.date
-
-    grouped = (
-        df.groupby(['Timestamp', 'Contract', 'Side', 'Price'], as_index=False)
-          .agg({
-              'Volume': 'sum',
-              'PnL': 'sum',
-              'Fees': 'sum',
-              'date': 'first'  # keep one date
-          })
-    )
-
-    grouped = grouped.sort_values('Timestamp', ascending=False)
-
-    output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
-
-    for date, group in grouped.groupby('date'):
-        file_name = output_path / f"trades_merged_{date}.csv"
-        group.to_csv(file_name, index=False)
-        print(f"✅ Saved {file_name}")
-
-
 """Extract trade setups from cleaned daily trades CSV."""
 
 
 def trade_setup():
-    df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-30.csv")
-    df = df.sort_values("Timestamp")
-
-    setups = []
-    position = 0
-    current_trades = []
-
-    for _, row in df.iterrows():
-        lots = row["Volume"]
-        if row["Side"] == "Buy":
-            position += lots
-        else:
-            position -= lots
-        current_trades.append(row)
-
-        if abs(position) == 0:  # back to zero
-            setup_df = pd.DataFrame(current_trades)
-            total_volume = setup_df["Volume"].sum()
-            entry_price = setup_df[setup_df["Side"] == "Sell"]["Price"].mean()
-            exit_price = setup_df[setup_df["Side"] == "Buy"]["Price"].mean()
-
-            gross_pnl = setup_df["PnL"].sum()
-            total_fees = setup_df["Fees"].sum()
-            net_pnl = gross_pnl - total_fees   # ✅ PnL adjusted for fees
-
-            entry_time = pd.to_datetime(
-                setup_df.iloc[0]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
-            exit_time = pd.to_datetime(
-                setup_df.iloc[-1]["Timestamp"]).strftime("%m/%d/%Y %H:%M:%S")
-
-            setups.append({
-                "ContractName": row["Contract"],
-                "Type": "Short" if setup_df.iloc[0]["Side"] == "Sell" else "Long",
-                "EnteredAt": entry_time,
-                "ExitedAt": exit_time,
-                "Size": total_volume / 2,
-                "EntryPrice": entry_price.round(2),
-                "ExitPrice": exit_price.round(2),
-                "PnL": net_pnl.round(2),
-            })
-            current_trades = []
-
-    setups_df = pd.DataFrame(setups)
-    setups_df.to_csv("trade_positions.csv", index=False)
-
-    print(f"✅ Extracted {len(setups_df)} trade setups → trade_setups.csv")
+    latest = sorted(Path("daily_trades_cleaned").glob("*.csv"))[-1]
+    extract_trade_setups(latest)
 
 
 def main_menu():
@@ -123,23 +51,6 @@ def main_menu():
             print(f"{key}. {desc}")
 
         choice = input("\nEnter your choice: ").strip()
-
-        if choice == "5":
-
-            df = pd.read_csv("trade_positions.csv", parse_dates=[
-                             "EnteredAt", "ExitedAt"])
-
-            # df = pd.read_csv("./daily_trades_cleaned/trades_merged_2025-10-21.csv", parse_dates=[
-            #     "EnteredAt", "ExitedAt"])
-
-            df = df.sort_values("EnteredAt")
-
-            # Compare ExitedAt of current row to EnteredAt of *next* row
-            mask = df["EnteredAt"] == df["ExitedAt"].shift(1)
-
-            matches = df[mask]
-            print(matches[['EnteredAt', 'ExitedAt',
-                           'EntryPrice', 'ExitPrice', 'PnL', 'Size', 'Type']])
 
         if choice == "4":
             print("👋 Exiting program.")
